@@ -1,0 +1,127 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import pandas as pd
+import os
+import threading
+import sys
+import traceback
+from openpyxl import load_workbook
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib import colors
+
+class ExcelToPDFConverter:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Excel to PDF Converter")
+        self.master.geometry("400x350")
+        self.file_path = ""
+        self.sheet_names = []
+        self.create_widgets()
+
+    def create_widgets(self):
+        tk.Label(self.master, text="Select an Excel file (.xlsx)").pack(pady=10)
+        self.file_button = tk.Button(self.master, text="Choose File", command=self.select_file)
+        self.file_button.pack(pady=5)
+        self.file_label = tk.Label(self.master, text="No file selected")
+        self.file_label.pack(pady=5)
+        self.sheet_var = tk.StringVar(value="all")
+        tk.Radiobutton(self.master, text="Convert all sheets", variable=self.sheet_var, value="all").pack()
+        tk.Radiobutton(self.master, text="Select specific sheet", variable=self.sheet_var, value="specific").pack()
+        self.sheet_listbox = tk.Listbox(self.master, selectmode=tk.SINGLE, height=5)
+        self.sheet_listbox.pack(pady=10)
+        self.sheet_listbox.config(state=tk.DISABLED)
+        self.convert_button = tk.Button(self.master, text="Convert to PDF", command=self.start_conversion)
+        self.convert_button.pack(pady=10)
+        self.status_label = tk.Label(self.master, text="")
+        self.status_label.pack(pady=5)
+
+    def select_file(self):
+        self.file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+        if self.file_path:
+            self.file_label.config(text=os.path.basename(self.file_path))
+            self.load_sheet_names()
+        else:
+            self.file_label.config(text="No file selected")
+            self.sheet_listbox.delete(0, tk.END)
+            self.sheet_listbox.config(state=tk.DISABLED)
+
+    def load_sheet_names(self):
+        try:
+            wb = load_workbook(self.file_path, read_only=True)
+            self.sheet_names = wb.sheetnames
+            self.sheet_listbox.config(state=tk.NORMAL)
+            self.sheet_listbox.delete(0, tk.END)
+            for sheet in self.sheet_names:
+                self.sheet_listbox.insert(tk.END, sheet)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load sheet names: {str(e)}")
+
+    def start_conversion(self):
+        if not self.file_path:
+            messagebox.showwarning("Warning", "Please select an Excel file first.")
+            return
+        sheet_option = self.sheet_var.get()
+        if sheet_option == "specific" and not self.sheet_listbox.curselection():
+            messagebox.showwarning("Warning", "Please select a specific sheet to convert.")
+            return
+        self.convert_button.config(state=tk.DISABLED)
+        self.status_label.config(text="Converting...")
+        sheet_name = None
+        if sheet_option == "specific":
+            sheet_name = self.sheet_names[self.sheet_listbox.curselection()[0]]
+        thread = threading.Thread(target=self.convert_to_pdf, args=(sheet_name,))
+        thread.start()
+
+    def convert_to_pdf(self, sheet_name=None):
+        try:
+            wb = load_workbook(self.file_path, read_only=True)
+            pdf_path = os.path.splitext(self.file_path)[0] + ".pdf"
+            doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+            elements = []
+
+            if sheet_name:
+                sheets = [wb[sheet_name]]
+            else:
+                sheets = wb.worksheets
+
+            for sheet in sheets:
+                data = []
+                for row in sheet.iter_rows(values_only=True):
+                    data.append(row)
+                table = Table(data)
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 14),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 12),
+                    ('TOPPADDING', (0, 1), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                elements.append(table)
+
+            doc.build(elements)
+            self.master.after(0, lambda: self.status_label.config(text="Conversion successful!"))
+            self.master.after(0, lambda: messagebox.showinfo("Success", f"PDF saved as: {pdf_path}"))
+        except Exception as e:
+            error_info = sys.exc_info()
+            error_msg = f"Error Type: {error_info[0].__name__}\n"
+            error_msg += f"Error Message: {str(e)}\n"
+            error_msg += f"Traceback:\n{''.join(traceback.format_tb(error_info[2]))}"
+            self.master.after(0, lambda: self.status_label.config(text="Conversion failed."))
+            self.master.after(0, lambda: messagebox.showerror("Error", f"Failed to convert:\n{error_msg}"))
+        finally:
+            self.master.after(0, lambda: self.convert_button.config(state=tk.NORMAL))
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ExcelToPDFConverter(root)
+    root.mainloop()
